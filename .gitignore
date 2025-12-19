@@ -1,5 +1,5 @@
 __pycache__/
-.venv/
+venv/
 .DS_Store
 .streamlit/
 *.pyc
@@ -7,3 +7,4 @@ __pycache__/
 *.pyd
 *.sqlite3
 *.log
+.idea/
