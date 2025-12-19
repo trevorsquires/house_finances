@@ -1,11 +1,12 @@
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]  # /mount/src/house_finances
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from __future__ import annotations
 
 import streamlit as st
 
@@ -21,6 +22,7 @@ from house_affordability.core.inputs import (
 from house_affordability.core.scenarios import base_scenario
 from house_affordability.core.simulator import simulate
 from house_affordability.validation.checks import validate_inputs
+
 
 
 st.set_page_config(page_title="Can I Afford This House?", layout="wide")
