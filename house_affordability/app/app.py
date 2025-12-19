@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]  # /mount/src/house_finances
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
+
 from __future__ import annotations
 
 import streamlit as st
