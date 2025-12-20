@@ -33,6 +33,8 @@ class MortgageInputs:
 class HouseholdInputs:
     base_salary_annual: float
     stock_comp_annual: float = 0.0
+    stock_vesting_months: int = 48  # standard 4-year
+    initial_stock_price: float = 100.0
     non_housing_expenses_monthly: float = 2000.0
     debt_payments_monthly: float = 0.0
     stock_contribution_monthly: float = 0.0
@@ -42,9 +44,6 @@ class HouseholdInputs:
 
     def monthly_salary(self) -> float:
         return self.base_salary_annual / 12.0
-
-    def monthly_stock_comp(self) -> float:
-        return self.stock_comp_annual / 12.0
 
 
 @dataclass

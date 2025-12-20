@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
 
 
 import streamlit as st
+import matplotlib.pyplot as plt
 
 from house_affordability.core.inputs import (
     HouseholdInputs,
@@ -19,6 +20,7 @@ from house_affordability.core.inputs import (
     SimulationInputs,
     SimulationSettings,
 )
+from house_affordability.core.mortgage import monthly_payment
 from house_affordability.core.scenarios import base_scenario
 from house_affordability.core.simulator import simulate
 from house_affordability.validation.checks import validate_inputs
@@ -71,6 +73,9 @@ def sidebar_inputs() -> SimulationInputs:
     stock_comp = st.sidebar.number_input(
         "Stock compensation (annual)", min_value=0, max_value=1_000_000, value=int(defaults.household.stock_comp_annual), step=5_000
     )
+    vest_years = st.sidebar.slider(
+        "RSU vesting duration (years)", min_value=1, max_value=6, value=defaults.household.stock_vesting_months // 12
+    )
     non_housing = st.sidebar.number_input(
         "Non-housing expenses (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.non_housing_expenses_monthly), step=100
     )
@@ -108,6 +113,9 @@ def sidebar_inputs() -> SimulationInputs:
         correlation = st.slider(
             "Stock/home correlation", min_value=-1.0, max_value=1.0, value=defaults.market.stock_home_correlation, step=0.05
         )
+        initial_stock_price = st.slider(
+            "RSU reference price ($)", min_value=1.0, max_value=1000.0, value=defaults.household.initial_stock_price, step=1.0
+        )
 
         st.subheader("Job loss")
         enable_job_loss = st.checkbox("Account for job loss", value=defaults.job_loss.enabled)
@@ -139,6 +147,8 @@ def sidebar_inputs() -> SimulationInputs:
     household_inputs = HouseholdInputs(
         base_salary_annual=float(base_salary),
         stock_comp_annual=float(stock_comp),
+        stock_vesting_months=int(vest_years * 12),
+        initial_stock_price=float(initial_stock_price),
         non_housing_expenses_monthly=float(non_housing),
         debt_payments_monthly=float(debt),
         stock_contribution_monthly=float(stock_contribution),
@@ -172,11 +182,59 @@ def sidebar_inputs() -> SimulationInputs:
     )
 
 
+def deterministic_snapshot(sim_inputs: SimulationInputs) -> dict:
+    principal = sim_inputs.property.loan_principal
+    p_and_i = monthly_payment(principal, sim_inputs.mortgage.annual_rate, sim_inputs.mortgage.term_years * 12)
+    housing_fixed = p_and_i + sim_inputs.property.property_tax_monthly + sim_inputs.property.insurance_monthly + sim_inputs.property.hoa_monthly
+    income = sim_inputs.household.monthly_salary() + sim_inputs.household.other_income_monthly
+    expenses = {
+        "Mortgage P&I": p_and_i,
+        "Property tax": sim_inputs.property.property_tax_monthly,
+        "Insurance": sim_inputs.property.insurance_monthly,
+        "HOA": sim_inputs.property.hoa_monthly,
+        "Non-housing": sim_inputs.household.non_housing_expenses_monthly,
+        "Debt": sim_inputs.household.debt_payments_monthly,
+        "Stock contribution": sim_inputs.household.stock_contribution_monthly,
+    }
+    total_out = sum(expenses.values())
+    leftover = income - total_out
+    return {"income": income, "expenses": expenses, "leftover": leftover, "housing_fixed": housing_fixed}
+
+
+def render_deterministic(snapshot: dict) -> None:
+    st.subheader("Monthly snapshot (deterministic)")
+    cols = st.columns(3)
+    cols[0].metric("Monthly income (ex-RSU)", f"${snapshot['income']:,.0f}")
+    cols[1].metric("Total housing costs", f"${snapshot['housing_fixed']:,.0f}")
+    cols[2].metric("Leftover / shortfall", f"${snapshot['leftover']:,.0f}")
+
+    labels = []
+    values = []
+    for label, value in snapshot["expenses"].items():
+        if value > 0:
+            labels.append(label)
+            values.append(value)
+    if snapshot["leftover"] > 0:
+        labels.append("Leftover")
+        values.append(snapshot["leftover"])
+    elif snapshot["leftover"] < 0:
+        labels.append("Shortfall")
+        values.append(abs(snapshot["leftover"]))
+
+    if values:
+        fig, ax = plt.subplots()
+        ax.pie(values, labels=labels, autopct="%.1f%%")
+        ax.set_title("Monthly cash flow breakdown")
+        st.pyplot(fig)
+    else:
+        st.info("No cash flow data to display.")
+
+
 def render_percentile_runs(result):
     st.subheader("Representative scenarios")
     for label, df in result.percentile_runs.items():
         st.markdown(f"**{label} percentile net worth path**")
-        chart_data = df.set_index("month")[["net_worth", "cash", "equity", "invested"]]
+        chart_data = df.set_index("month")[["net_worth", "cash", "equity", "invested_cash", "vested_value"]]
         st.line_chart(chart_data, height=240)
 
 
@@ -200,23 +258,29 @@ def main():
 
     sim_inputs = sidebar_inputs()
 
-    run_btn = st.button("Run simulation", type="primary")
-    if not run_btn:
-        st.info("Adjust inputs in the sidebar and click **Run simulation**.")
-        return
+    tab_det, tab_sim = st.tabs(["Deterministic view", "Simulation"])
 
-    try:
-        validate_inputs(sim_inputs)
-        result = simulate(sim_inputs)
-    except Exception as exc:  # Streamlit friendly error surface
-        st.error(f"Unable to run simulation: {exc}")
-        return
+    with tab_det:
+        snap = deterministic_snapshot(sim_inputs)
+        render_deterministic(snap)
 
-    render_summary(result)
-    render_percentile_runs(result)
+    with tab_sim:
+        run_btn = st.button("Run simulation", type="primary")
+        if not run_btn:
+            st.info("Adjust inputs in the sidebar and click **Run simulation**.")
+            return
+        try:
+            validate_inputs(sim_inputs)
+            result = simulate(sim_inputs)
+        except Exception as exc:  # Streamlit friendly error surface
+            st.error(f"Unable to run simulation: {exc}")
+            return
 
-    st.markdown("### Raw outputs")
-    st.dataframe(result.run_metrics.reset_index(), use_container_width=True)
+        render_summary(result)
+        render_percentile_runs(result)
+
+        st.markdown("### Raw outputs")
+        st.dataframe(result.run_metrics.reset_index(), use_container_width=True)
 
 
 if __name__ == "__main__":

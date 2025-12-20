@@ -43,6 +43,8 @@ def base_scenario() -> SimulationInputs:
     household_inputs = HouseholdInputs(
         base_salary_annual=180_000,
         stock_comp_annual=20_000,
+        stock_vesting_months=48,
+        initial_stock_price=100.0,
         non_housing_expenses_monthly=3000,
         debt_payments_monthly=400,
         stock_contribution_monthly=500,
