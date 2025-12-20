@@ -41,9 +41,14 @@ class HouseholdInputs:
     savings_buffer: float = 0.0
     inflation_annual: float = 0.02
     other_income_monthly: float = 0.0
+    federal_tax_rate: float = 0.25
+    state_tax_rate: float = 0.075
 
     def monthly_salary(self) -> float:
         return self.base_salary_annual / 12.0
+
+    def total_tax_rate(self) -> float:
+        return self.federal_tax_rate + self.state_tax_rate
 
 
 @dataclass

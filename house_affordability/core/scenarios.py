@@ -24,16 +24,16 @@ def default_market_assumptions() -> MarketAssumptions:
 def base_scenario() -> SimulationInputs:
     """Provide a reasonable starting point for the UI."""
     property_inputs = PropertyInputs(
-        purchase_price=600_000,
-        down_payment=120_000,
-        closing_costs=10_000,
-        property_tax_monthly=600,
+        purchase_price=350_000,
+        down_payment=70_000,
+        closing_costs=8_000,
+        property_tax_monthly=400,
         insurance_monthly=180,
         hoa_monthly=100,
     )
 
     mortgage_inputs = MortgageInputs(
-        annual_rate=0.06,
+        annual_rate=0.05,
         term_years=30,
         loan_type="fixed",
         arm_fixed_years=7,
@@ -41,14 +41,16 @@ def base_scenario() -> SimulationInputs:
     )
 
     household_inputs = HouseholdInputs(
-        base_salary_annual=180_000,
+        base_salary_annual=100_000,
         stock_comp_annual=20_000,
         stock_vesting_months=48,
         initial_stock_price=100.0,
-        non_housing_expenses_monthly=3000,
+        federal_tax_rate=0.25,
+        state_tax_rate=0.075,
+        non_housing_expenses_monthly=2500,
         debt_payments_monthly=400,
         stock_contribution_monthly=500,
-        savings_buffer=60_000,
+        savings_buffer=6_000,
         inflation_annual=0.025,
         other_income_monthly=0.0,
     )

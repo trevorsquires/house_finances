@@ -32,71 +32,77 @@ st.set_page_config(page_title="Can I Afford This House?", layout="wide")
 
 def sidebar_inputs() -> SimulationInputs:
     defaults = base_scenario()
-    st.sidebar.header("Home purchase")
-    purchase_price = st.sidebar.number_input(
-        "Purchase price", min_value=50_000, max_value=5_000_000, value=int(defaults.property.purchase_price), step=10_000
-    )
-    down_payment = st.sidebar.number_input(
-        "Down payment", min_value=0, max_value=int(purchase_price), value=int(defaults.property.down_payment), step=5_000
-    )
-    closing_costs = st.sidebar.number_input(
-        "Closing costs", min_value=0, max_value=200_000, value=int(defaults.property.closing_costs), step=1_000
-    )
-    property_tax = st.sidebar.number_input(
-        "Property tax (monthly)", min_value=0, max_value=10_000, value=int(defaults.property.property_tax_monthly), step=50
-    )
-    insurance = st.sidebar.number_input(
-        "Home insurance (monthly)", min_value=0, max_value=5_000, value=int(defaults.property.insurance_monthly), step=25
-    )
-    hoa = st.sidebar.number_input(
-        "HOA (monthly)", min_value=0, max_value=5_000, value=int(defaults.property.hoa_monthly), step=25
-    )
-
-    st.sidebar.header("Mortgage")
-    loan_type = st.sidebar.selectbox("Loan type", options=["fixed", "arm"], index=0 if defaults.mortgage.loan_type == "fixed" else 1)
-    interest_rate = st.sidebar.slider(
-        "Interest rate (annual %)", min_value=0.0, max_value=15.0, value=defaults.mortgage.annual_rate * 100, step=0.1
-    )
-    term_years = st.sidebar.slider("Term (years)", min_value=10, max_value=40, value=defaults.mortgage.term_years, step=5)
-    arm_fixed_years = defaults.mortgage.arm_fixed_years
-    arm_adjusted_rate = defaults.mortgage.arm_adjusted_rate or defaults.mortgage.annual_rate + 0.01
-    if loan_type == "arm":
-        arm_fixed_years = st.sidebar.slider("ARM fixed period (years)", min_value=1, max_value=10, value=defaults.mortgage.arm_fixed_years)
-        arm_adjusted_rate = st.sidebar.slider(
-            "ARM adjusted rate (annual %)", min_value=0.0, max_value=20.0, value=arm_adjusted_rate * 100, step=0.1
+    with st.sidebar.expander("House & Loan", expanded=False):
+        st.markdown("### Purchase")
+        purchase_price = st.number_input(
+            "Purchase price", min_value=50_000, max_value=5_000_000, value=int(defaults.property.purchase_price), step=10_000
+        )
+        down_payment = st.number_input(
+            "Down payment", min_value=0, max_value=int(purchase_price), value=int(defaults.property.down_payment), step=5_000
+        )
+        closing_costs = st.number_input(
+            "Closing costs", min_value=0, max_value=200_000, value=int(defaults.property.closing_costs), step=1_000
+        )
+        property_tax = st.number_input(
+            "Property tax (monthly)", min_value=0, max_value=10_000, value=int(defaults.property.property_tax_monthly), step=50
+        )
+        insurance = st.number_input(
+            "Home insurance (monthly)", min_value=0, max_value=5_000, value=int(defaults.property.insurance_monthly), step=25
+        )
+        hoa = st.number_input(
+            "HOA (monthly)", min_value=0, max_value=5_000, value=int(defaults.property.hoa_monthly), step=25
         )
 
-    st.sidebar.header("Household")
-    base_salary = st.sidebar.number_input(
-        "Base salary (annual)", min_value=0, max_value=1_000_000, value=int(defaults.household.base_salary_annual), step=5_000
-    )
-    stock_comp = st.sidebar.number_input(
-        "Stock compensation (annual)", min_value=0, max_value=1_000_000, value=int(defaults.household.stock_comp_annual), step=5_000
-    )
-    vest_years = st.sidebar.slider(
-        "RSU vesting duration (years)", min_value=1, max_value=6, value=defaults.household.stock_vesting_months // 12
-    )
-    non_housing = st.sidebar.number_input(
-        "Non-housing expenses (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.non_housing_expenses_monthly), step=100
-    )
-    debt = st.sidebar.number_input(
-        "Debt obligations (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.debt_payments_monthly), step=50
-    )
-    stock_contribution = st.sidebar.number_input(
-        "Desired stock investment (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.stock_contribution_monthly), step=50
-    )
-    savings = st.sidebar.number_input(
-        "Savings buffer (cash on hand)", min_value=0, max_value=2_000_000, value=int(defaults.household.savings_buffer), step=5_000
-    )
-    inflation = st.sidebar.slider(
-        "Expense inflation (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.inflation_annual * 100, step=0.1
-    )
+        st.markdown("### Mortgage")
+        loan_type = st.selectbox("Loan type", options=["fixed", "arm"], index=0 if defaults.mortgage.loan_type == "fixed" else 1)
+        interest_rate = st.slider(
+            "Interest rate (annual %)", min_value=0.0, max_value=15.0, value=defaults.mortgage.annual_rate * 100, step=0.1
+        )
+        term_years = st.slider("Term (years)", min_value=10, max_value=40, value=defaults.mortgage.term_years, step=5)
+        arm_fixed_years = defaults.mortgage.arm_fixed_years
+        arm_adjusted_rate = defaults.mortgage.arm_adjusted_rate or defaults.mortgage.annual_rate + 0.01
+        if loan_type == "arm":
+            arm_fixed_years = st.slider("ARM fixed period (years)", min_value=1, max_value=10, value=defaults.mortgage.arm_fixed_years)
+            arm_adjusted_rate = st.slider(
+                "ARM adjusted rate (annual %)", min_value=0.0, max_value=20.0, value=arm_adjusted_rate * 100, step=0.1
+            )
 
-    st.sidebar.header("Simulation")
-    horizon_years = st.sidebar.slider("Horizon (years)", min_value=1, max_value=30, value=defaults.simulation.months // 12)
-    num_runs = st.sidebar.slider("Simulations", min_value=100, max_value=2000, value=defaults.simulation.num_runs, step=50)
+    with st.sidebar.expander("Personal Finances", expanded=False):
+        base_salary = st.number_input(
+            "Base salary (annual)", min_value=0, max_value=1_000_000, value=int(defaults.household.base_salary_annual), step=5_000
+        )
+        stock_comp = st.number_input(
+            "Stock compensation (annual)", min_value=0, max_value=1_000_000, value=int(defaults.household.stock_comp_annual), step=5_000
+        )
+        vest_years = st.slider(
+            "RSU vesting duration (years)", min_value=1, max_value=6, value=defaults.household.stock_vesting_months // 12
+        )
+        non_housing = st.number_input(
+            "Non-housing expenses (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.non_housing_expenses_monthly), step=100
+        )
+        debt = st.number_input(
+            "Debt obligations (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.debt_payments_monthly), step=50
+        )
+        stock_contribution = st.number_input(
+            "Desired stock investment (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.stock_contribution_monthly), step=50
+        )
+        savings = st.number_input(
+            "Savings buffer (cash on hand)", min_value=0, max_value=2_000_000, value=int(defaults.household.savings_buffer), step=5_000
+        )
+        inflation = st.slider(
+            "Expense inflation (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.inflation_annual * 100, step=0.1
+        )
+        federal_tax = st.slider(
+            "Federal tax rate (%)", min_value=0.0, max_value=50.0, value=defaults.household.federal_tax_rate * 100, step=0.5
+        )
+        state_tax = st.slider(
+            "State tax rate (%)", min_value=0.0, max_value=20.0, value=defaults.household.state_tax_rate * 100, step=0.5
+        )
 
-    with st.sidebar.expander("Advanced settings"):
+    with st.sidebar.expander("Simulation & Advanced Settings", expanded=False):
+        horizon_years = st.slider("Horizon (years)", min_value=1, max_value=30, value=defaults.simulation.months // 12)
+        num_runs = st.slider("Simulations", min_value=100, max_value=2000, value=defaults.simulation.num_runs, step=50)
+
         st.subheader("Market assumptions")
         stock_return = st.slider(
             "Stock return (annual %)", min_value=-10.0, max_value=20.0, value=defaults.market.stock_return_annual * 100, step=0.5
@@ -154,6 +160,8 @@ def sidebar_inputs() -> SimulationInputs:
         stock_contribution_monthly=float(stock_contribution),
         savings_buffer=float(savings),
         inflation_annual=inflation / 100.0,
+        federal_tax_rate=federal_tax / 100.0,
+        state_tax_rate=state_tax / 100.0,
     )
 
     market_inputs = MarketAssumptions(
@@ -186,8 +194,12 @@ def deterministic_snapshot(sim_inputs: SimulationInputs) -> dict:
     principal = sim_inputs.property.loan_principal
     p_and_i = monthly_payment(principal, sim_inputs.mortgage.annual_rate, sim_inputs.mortgage.term_years * 12)
     housing_fixed = p_and_i + sim_inputs.property.property_tax_monthly + sim_inputs.property.insurance_monthly + sim_inputs.property.hoa_monthly
-    income = sim_inputs.household.monthly_salary() + sim_inputs.household.other_income_monthly
+    gross_income = sim_inputs.household.monthly_salary() + sim_inputs.household.other_income_monthly
+    tax_rate = sim_inputs.household.total_tax_rate()
+    income_tax = gross_income * tax_rate
+    income = gross_income - income_tax
     expenses = {
+        "Taxes": income_tax,
         "Mortgage P&I": p_and_i,
         "Property tax": sim_inputs.property.property_tax_monthly,
         "Insurance": sim_inputs.property.insurance_monthly,
@@ -197,14 +209,14 @@ def deterministic_snapshot(sim_inputs: SimulationInputs) -> dict:
         "Stock contribution": sim_inputs.household.stock_contribution_monthly,
     }
     total_out = sum(expenses.values())
-    leftover = income - total_out
-    return {"income": income, "expenses": expenses, "leftover": leftover, "housing_fixed": housing_fixed}
+    leftover = gross_income - total_out
+    return {"income": income, "gross_income": gross_income, "expenses": expenses, "leftover": leftover, "housing_fixed": housing_fixed}
 
 
 def render_deterministic(snapshot: dict) -> None:
     st.subheader("Monthly snapshot (deterministic)")
     cols = st.columns(3)
-    cols[0].metric("Monthly income (ex-RSU)", f"${snapshot['income']:,.0f}")
+    cols[0].metric("Monthly income (after tax, ex-RSU)", f"${snapshot['income']:,.0f}")
     cols[1].metric("Total housing costs", f"${snapshot['housing_fixed']:,.0f}")
     cols[2].metric("Leftover / shortfall", f"${snapshot['leftover']:,.0f}")
 

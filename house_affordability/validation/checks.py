@@ -34,11 +34,15 @@ def validate_mortgage(inputs: MortgageInputs) -> None:
 def validate_household(inputs: HouseholdInputs) -> None:
     _require(inputs.base_salary_annual >= 0, "Base salary cannot be negative.")
     _require(inputs.stock_comp_annual >= 0, "Stock compensation cannot be negative.")
+    _require(inputs.stock_vesting_months > 0, "Stock vesting duration must be positive.")
+    _require(inputs.initial_stock_price > 0, "Initial stock price must be positive.")
     _require(inputs.non_housing_expenses_monthly >= 0, "Expenses cannot be negative.")
     _require(inputs.debt_payments_monthly >= 0, "Debt payments cannot be negative.")
     _require(inputs.stock_contribution_monthly >= 0, "Stock contribution cannot be negative.")
     _require(inputs.savings_buffer >= 0, "Savings buffer cannot be negative.")
     _require(inputs.inflation_annual >= 0, "Inflation cannot be negative.")
+    _require(0 <= inputs.federal_tax_rate < 1, "Federal tax rate must be between 0 and 1.")
+    _require(0 <= inputs.state_tax_rate < 1, "State tax rate must be between 0 and 1.")
 
 
 def validate_inputs(sim_inputs: SimulationInputs) -> None:

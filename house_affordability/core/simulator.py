@@ -11,6 +11,7 @@ from house_affordability.validation.checks import validate_inputs
 from .budget import monthly_income, monthly_non_housing_expense, recurring_housing_costs
 from .inputs import SimulationInputs
 from .mortgage import amortization_schedule
+from .taxes import apply_tax
 
 
 @dataclass
@@ -56,6 +57,8 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
 
     base_expenses = sim_inputs.household.non_housing_expenses_monthly
     job_loss = sim_inputs.job_loss
+    federal_rate = sim_inputs.household.federal_tax_rate
+    state_rate = sim_inputs.household.state_tax_rate
 
     path_records = []
     run_records = []
@@ -85,6 +88,7 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
                 job_lost=job_lost,
                 replacement_income_ratio=job_loss.replacement_income_ratio if job_loss.enabled else 1.0,
             )
+            net_income_cash, tax_on_income = apply_tax(monthly_income_cash, federal_rate, state_rate)
             prev_cash = cash
             schedule_row = amort_df.iloc[month_idx]
             housing_payment = schedule_row["payment"]
@@ -92,7 +96,7 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
             non_housing = monthly_non_housing_expense(base_expenses, sim_inputs.household.inflation_annual, month_idx)
             total_essential_outflow = housing_payment + recurring_housing + non_housing + sim_inputs.household.debt_payments_monthly
 
-            cash_after_essentials = prev_cash + monthly_income_cash - total_essential_outflow
+            cash_after_essentials = prev_cash + net_income_cash - total_essential_outflow
 
             # Sell vested stock if needed to avoid default
             month_default = cash_after_essentials < 0
@@ -134,13 +138,18 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
 
             # Advance vesting (semiannual cadence)
             vested_this_month = 0.0
+            tax_on_vesting = 0.0
             for tranche in unvested_tranches:
                 tranche["months_elapsed"] += 1
                 if tranche["events_remaining"] > 0 and tranche["months_elapsed"] % 6 == 0:
                     vested_amount = tranche["units_per_event"]
-                    vested_units += vested_amount
+                    gross_value = vested_amount * stock_price
+                    net_value, tax_value = apply_tax(gross_value, federal_rate, state_rate)
+                    net_units = net_value / stock_price if stock_price > 0 else 0.0
+                    vested_units += net_units
                     tranche["events_remaining"] -= 1
-                    vested_this_month += vested_amount
+                    vested_this_month += net_units
+                    tax_on_vesting += tax_value
             # Drop fully vested tranches
             unvested_tranches = [t for t in unvested_tranches if t["events_remaining"] > 0]
 
@@ -179,6 +188,8 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
                     "job_lost": job_lost,
                     "liquidated_from_stock": liquidated_from_stock,
                     "vested_this_month": vested_this_month,
+                    "tax_paid_income": tax_on_income,
+                    "tax_paid_rsu": tax_on_vesting,
                 }
             )
 
