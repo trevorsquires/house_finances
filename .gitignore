@@ -8,3 +8,5 @@ venv/
 *.sqlite3
 *.log
 .idea/
+venv/
+
