@@ -50,7 +50,7 @@ def base_scenario() -> SimulationInputs:
         non_housing_expenses_monthly=2500,
         debt_payments_monthly=400,
         stock_contribution_monthly=500,
-        savings_buffer=6_000,
+        cash_on_hand=100_000,
         inflation_annual=0.025,
         other_income_monthly=0.0,
     )

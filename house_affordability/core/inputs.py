@@ -38,7 +38,7 @@ class HouseholdInputs:
     non_housing_expenses_monthly: float = 2000.0
     debt_payments_monthly: float = 0.0
     stock_contribution_monthly: float = 0.0
-    savings_buffer: float = 0.0
+    cash_on_hand: float = 0.0
     inflation_annual: float = 0.02
     other_income_monthly: float = 0.0
     federal_tax_rate: float = 0.25

@@ -64,7 +64,7 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
     run_records = []
 
     for run_idx in range(settings.num_runs):
-        cash = sim_inputs.household.savings_buffer  # assumed post-closing liquidity
+        cash = sim_inputs.household.cash_on_hand - sim_inputs.property.down_payment - sim_inputs.property.closing_costs
         invested_cash = 0.0
         stock_price = sim_inputs.household.initial_stock_price
         vested_units = 0.0

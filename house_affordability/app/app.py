@@ -8,8 +8,8 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 
+import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
 
 from house_affordability.core.inputs import (
     HouseholdInputs,
@@ -87,7 +87,7 @@ def sidebar_inputs() -> SimulationInputs:
             "Desired stock investment (monthly)", min_value=0, max_value=20_000, value=int(defaults.household.stock_contribution_monthly), step=50
         )
         savings = st.number_input(
-            "Savings buffer (cash on hand)", min_value=0, max_value=2_000_000, value=int(defaults.household.savings_buffer), step=5_000
+            "Cash on hand (pre-closing)", min_value=0, max_value=2_000_000, value=int(defaults.household.cash_on_hand), step=5_000
         )
         inflation = st.slider(
             "Expense inflation (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.inflation_annual * 100, step=0.1
@@ -158,7 +158,7 @@ def sidebar_inputs() -> SimulationInputs:
         non_housing_expenses_monthly=float(non_housing),
         debt_payments_monthly=float(debt),
         stock_contribution_monthly=float(stock_contribution),
-        savings_buffer=float(savings),
+        cash_on_hand=float(savings),
         inflation_annual=inflation / 100.0,
         federal_tax_rate=federal_tax / 100.0,
         state_tax_rate=state_tax / 100.0,
@@ -195,11 +195,12 @@ def deterministic_snapshot(sim_inputs: SimulationInputs) -> dict:
     p_and_i = monthly_payment(principal, sim_inputs.mortgage.annual_rate, sim_inputs.mortgage.term_years * 12)
     housing_fixed = p_and_i + sim_inputs.property.property_tax_monthly + sim_inputs.property.insurance_monthly + sim_inputs.property.hoa_monthly
     gross_income = sim_inputs.household.monthly_salary() + sim_inputs.household.other_income_monthly
-    tax_rate = sim_inputs.household.total_tax_rate()
-    income_tax = gross_income * tax_rate
-    income = gross_income - income_tax
+    federal_tax = gross_income * sim_inputs.household.federal_tax_rate
+    state_tax = gross_income * sim_inputs.household.state_tax_rate
+    after_tax_income = gross_income - federal_tax - state_tax
     expenses = {
-        "Taxes": income_tax,
+        "Federal tax": federal_tax,
+        "State tax": state_tax,
         "Mortgage P&I": p_and_i,
         "Property tax": sim_inputs.property.property_tax_monthly,
         "Insurance": sim_inputs.property.insurance_monthly,
@@ -210,36 +211,74 @@ def deterministic_snapshot(sim_inputs: SimulationInputs) -> dict:
     }
     total_out = sum(expenses.values())
     leftover = gross_income - total_out
-    return {"income": income, "gross_income": gross_income, "expenses": expenses, "leftover": leftover, "housing_fixed": housing_fixed}
+    post_close_cash = sim_inputs.household.cash_on_hand - sim_inputs.property.down_payment - sim_inputs.property.closing_costs
+    monthly_gap = max(-leftover, 0)
+    runway_months = (post_close_cash / monthly_gap) if monthly_gap > 0 else None
+    front_end = housing_fixed / gross_income if gross_income else 0.0
+    back_end = (housing_fixed + sim_inputs.household.debt_payments_monthly) / gross_income if gross_income else 0.0
+    loan_to_value = principal / sim_inputs.property.purchase_price if sim_inputs.property.purchase_price else 0.0
+    reserves_months = post_close_cash / (housing_fixed + sim_inputs.household.debt_payments_monthly) if (housing_fixed + sim_inputs.household.debt_payments_monthly) > 0 else None
+
+    return {
+        "income_after_tax": after_tax_income,
+        "gross_income": gross_income,
+        "expenses": expenses,
+        "leftover": leftover,
+        "housing_fixed": housing_fixed,
+        "front_end": front_end,
+        "back_end": back_end,
+        "ltv": loan_to_value,
+        "reserves_months": reserves_months,
+        "post_close_cash": post_close_cash,
+        "runway_months": runway_months,
+        "months_to_first_vest": 6,  # semiannual cadence assumption
+    }
 
 
 def render_deterministic(snapshot: dict) -> None:
-    st.subheader("Monthly snapshot (deterministic)")
-    cols = st.columns(3)
-    cols[0].metric("Monthly income (after tax, ex-RSU)", f"${snapshot['income']:,.0f}")
-    cols[1].metric("Total housing costs", f"${snapshot['housing_fixed']:,.0f}")
-    cols[2].metric("Leftover / shortfall", f"${snapshot['leftover']:,.0f}")
+    st.markdown("#### Cash flow math")
+    rows = [
+        ("Gross monthly pay", snapshot["gross_income"]),
+        ("Federal tax", -snapshot["expenses"]["Federal tax"]),
+        ("State tax", -snapshot["expenses"]["State tax"]),
+        ("Mortgage P&I", -snapshot["expenses"]["Mortgage P&I"]),
+        ("Property tax", -snapshot["expenses"]["Property tax"]),
+        ("Insurance", -snapshot["expenses"]["Insurance"]),
+        ("HOA", -snapshot["expenses"]["HOA"]),
+        ("Non-housing", -snapshot["expenses"]["Non-housing"]),
+        ("Debt", -snapshot["expenses"]["Debt"]),
+        ("Stock contribution", -snapshot["expenses"]["Stock contribution"]),
+        ("Monthly surplus / deficit", snapshot["leftover"]),
+    ]
+    df = pd.DataFrame(rows, columns=["Line item", "Amount"])
+    df["Amount"] = df["Amount"].map(lambda x: f"${x:,.0f}")
+    styled = df.style.set_properties(subset=pd.IndexSlice[df.index[-1], :], **{"font-weight": "bold"})
+    st.table(styled)
 
-    labels = []
-    values = []
-    for label, value in snapshot["expenses"].items():
-        if value > 0:
-            labels.append(label)
-            values.append(value)
-    if snapshot["leftover"] > 0:
-        labels.append("Leftover")
-        values.append(snapshot["leftover"])
-    elif snapshot["leftover"] < 0:
-        labels.append("Shortfall")
-        values.append(abs(snapshot["leftover"]))
 
-    if values:
-        fig, ax = plt.subplots()
-        ax.pie(values, labels=labels, autopct="%.1f%%")
-        ax.set_title("Monthly cash flow breakdown")
-        st.pyplot(fig)
-    else:
-        st.info("No cash flow data to display.")
+def render_lender_indicators(snapshot: dict, sim_inputs: SimulationInputs) -> None:
+    st.subheader("Lender indicators")
+    indicators = [
+        ("Front-end ratio", snapshot["front_end"] * 100, "<= 31%", snapshot["front_end"] <= 0.31),
+        ("Back-end DTI", snapshot["back_end"] * 100, "<= 43%", snapshot["back_end"] <= 0.43),
+        ("Loan-to-value (LTV)", snapshot["ltv"] * 100, "<= 80%", snapshot["ltv"] <= 0.80),
+        (
+            "Cash reserves (months of housing+debt)",
+            snapshot["reserves_months"] if snapshot["reserves_months"] is not None else 0,
+            ">= 3 mo",
+            (snapshot["reserves_months"] or 0) >= 3,
+        ),
+    ]
+    df = pd.DataFrame(indicators, columns=["Heuristic", "Value", "Target", "Satisfies"])
+    def fmt_val(row):
+        target = str(row["Target"]).lower()
+        if "month" in target or "mo" in target:
+            return f"{row['Value']:.1f} mo"
+        return f"{row['Value']:.1f}%"
+    df["Value"] = df.apply(fmt_val, axis=1)
+    df["Satisfies"] = df["Satisfies"].map(lambda x: "Yes" if x else "No")
+    st.table(df)
+    st.caption("Targets are illustrative; lender guidelines vary.")
 
 
 def render_percentile_runs(result):
@@ -270,11 +309,15 @@ def main():
 
     sim_inputs = sidebar_inputs()
 
-    tab_det, tab_sim = st.tabs(["Deterministic view", "Simulation"])
+    tab_calc, tab_lender, tab_sim = st.tabs(["Monthly calculations", "Lender indicators", "Simulation"])
 
-    with tab_det:
+    with tab_calc:
         snap = deterministic_snapshot(sim_inputs)
         render_deterministic(snap)
+
+    with tab_lender:
+        snap = deterministic_snapshot(sim_inputs)
+        render_lender_indicators(snap, sim_inputs)
 
     with tab_sim:
         run_btn = st.button("Run simulation", type="primary")
