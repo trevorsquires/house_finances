@@ -40,6 +40,7 @@ class HouseholdInputs:
     stock_contribution_monthly: float = 0.0
     cash_on_hand: float = 0.0
     inflation_annual: float = 0.02
+    salary_growth_annual: float = 0.02
     other_income_monthly: float = 0.0
     federal_tax_rate: float = 0.25
     state_tax_rate: float = 0.075

@@ -19,8 +19,9 @@ def recurring_housing_costs(property_inputs: PropertyInputs) -> float:
 
 
 def monthly_income(
-    household: HouseholdInputs, job_lost: bool, replacement_income_ratio: float
+    household: HouseholdInputs, job_lost: bool, replacement_income_ratio: float, month_index: int
 ) -> tuple[float, float]:
     """Return (salary_income, stock_comp_income). RSUs are handled separately."""
-    salary = household.monthly_salary() * (replacement_income_ratio if job_lost else 1.0)
+    growth = (1 + household.salary_growth_annual) ** (month_index / 12.0)
+    salary = household.monthly_salary() * growth * (replacement_income_ratio if job_lost else 1.0)
     return salary + household.other_income_monthly, 0.0

@@ -23,6 +23,7 @@ from house_affordability.core.inputs import (
 from house_affordability.core.mortgage import monthly_payment
 from house_affordability.core.scenarios import base_scenario
 from house_affordability.core.simulator import simulate
+from house_affordability.core.what_if import WhatIfScenario, run_what_if
 from house_affordability.validation.checks import validate_inputs
 
 
@@ -55,8 +56,13 @@ def sidebar_inputs() -> SimulationInputs:
 
         st.markdown("### Mortgage")
         loan_type = st.selectbox("Loan type", options=["fixed", "arm"], index=0 if defaults.mortgage.loan_type == "fixed" else 1)
-        interest_rate = st.slider(
-            "Interest rate (annual %)", min_value=0.0, max_value=15.0, value=defaults.mortgage.annual_rate * 100, step=0.1
+        interest_rate = st.number_input(
+            "Interest rate (annual %)",
+            min_value=0.0,
+            max_value=15.0,
+            value=float(defaults.mortgage.annual_rate * 100),
+            step=0.01,
+            format="%.3f",
         )
         term_years = st.slider("Term (years)", min_value=10, max_value=40, value=defaults.mortgage.term_years, step=5)
         arm_fixed_years = defaults.mortgage.arm_fixed_years
@@ -89,8 +95,8 @@ def sidebar_inputs() -> SimulationInputs:
         savings = st.number_input(
             "Cash on hand (pre-closing)", min_value=0, max_value=2_000_000, value=int(defaults.household.cash_on_hand), step=5_000
         )
-        inflation = st.slider(
-            "Expense inflation (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.inflation_annual * 100, step=0.1
+        salary_growth = st.slider(
+            "Salary growth (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.salary_growth_annual * 100, step=0.1
         )
         federal_tax = st.slider(
             "Federal tax rate (%)", min_value=0.0, max_value=50.0, value=defaults.household.federal_tax_rate * 100, step=0.5
@@ -102,6 +108,9 @@ def sidebar_inputs() -> SimulationInputs:
     with st.sidebar.expander("Simulation & Advanced Settings", expanded=False):
         horizon_years = st.slider("Horizon (years)", min_value=1, max_value=30, value=defaults.simulation.months // 12)
         num_runs = st.slider("Simulations", min_value=100, max_value=2000, value=defaults.simulation.num_runs, step=50)
+        inflation = st.slider(
+            "Expense inflation (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.inflation_annual * 100, step=0.1
+        )
 
         st.subheader("Market assumptions")
         stock_return = st.slider(
@@ -159,6 +168,7 @@ def sidebar_inputs() -> SimulationInputs:
         debt_payments_monthly=float(debt),
         stock_contribution_monthly=float(stock_contribution),
         cash_on_hand=float(savings),
+        salary_growth_annual=salary_growth / 100.0,
         inflation_annual=inflation / 100.0,
         federal_tax_rate=federal_tax / 100.0,
         state_tax_rate=state_tax / 100.0,
@@ -283,22 +293,50 @@ def render_lender_indicators(snapshot: dict, sim_inputs: SimulationInputs) -> No
 
 def render_percentile_runs(result):
     st.subheader("Representative scenarios")
+    scenario_labels = {
+        "25th": "Downside Scenario (25th percentile net worth)",
+        "50th": "Average Scenario (50th percentile net worth)",
+        "75th": "Upside Scenario (75th percentile net worth)",
+    }
+    rows = []
     for label, df in result.percentile_runs.items():
-        st.markdown(f"**{label} percentile net worth path**")
+        run_id = df["run"].iloc[0] if "run" in df.columns else None
+        metrics = result.run_metrics.loc[run_id] if run_id is not None else None
+        if metrics is not None:
+            rows.append(
+                (
+                    scenario_labels.get(label, label),
+                    f"{metrics['negative_months_pct']*100:.1f}%",
+                    f"${metrics['min_liquidity']:,.0f}",
+                    f"{metrics['longest_negative_streak']:.0f} mo",
+                )
+            )
+    if rows:
+        st.markdown("**Cash flow stress by scenario**")
+        table_df = pd.DataFrame(
+            rows,
+            columns=[
+                "Scenario",
+                "% months cash-flow negative",
+                "Lowest liquidity (cash + liquid investments)",
+                "Longest negative streak",
+            ],
+        )
+        st.table(table_df)
+
+    for label, df in result.percentile_runs.items():
+        title = scenario_labels.get(label, f"{label} percentile net worth path")
+        st.markdown(f"**{title}**")
         chart_data = df.set_index("month")[["net_worth", "cash", "equity", "invested_cash", "vested_value"]]
         st.line_chart(chart_data, height=240)
 
 
 def render_summary(result):
     st.subheader("Risk dashboard")
-    cols = st.columns(4)
+    cols = st.columns(3)
     cols[0].metric("Default probability", f"{result.summary['probability_default']*100:.1f}%")
     cols[1].metric("Underwater probability", f"{result.summary['probability_underwater']*100:.1f}%")
-    cols[2].metric("Median final net worth", f"${result.summary['median_final_net_worth']:,.0f}")
-    cols[3].metric("Expected monthly cash flow", f"${result.summary['expected_monthly_cash_flow']:,.0f}")
-
-    st.markdown("### Final net worth distribution")
-    st.bar_chart(result.run_metrics["final_net_worth"])
+    cols[2].metric("Expected final net worth", f"${result.summary['expected_final_net_worth']:,.0f}")
 
 
 def main():
@@ -309,7 +347,9 @@ def main():
 
     sim_inputs = sidebar_inputs()
 
-    tab_calc, tab_lender, tab_sim = st.tabs(["Monthly calculations", "Lender indicators", "Simulation"])
+    tab_calc, tab_lender, tab_sim, tab_whatif = st.tabs(
+        ["Monthly calculations", "Lender indicators", "Simulation", "What-if scenarios"]
+    )
 
     with tab_calc:
         snap = deterministic_snapshot(sim_inputs)
@@ -323,19 +363,116 @@ def main():
         run_btn = st.button("Run simulation", type="primary")
         if not run_btn:
             st.info("Adjust inputs in the sidebar and click **Run simulation**.")
-            return
-        try:
-            validate_inputs(sim_inputs)
-            result = simulate(sim_inputs)
-        except Exception as exc:  # Streamlit friendly error surface
-            st.error(f"Unable to run simulation: {exc}")
-            return
+        else:
+            try:
+                validate_inputs(sim_inputs)
+                result = simulate(sim_inputs)
+            except Exception as exc:  # Streamlit friendly error surface
+                st.error(f"Unable to run simulation: {exc}")
+            else:
+                render_summary(result)
+                render_percentile_runs(result)
 
-        render_summary(result)
-        render_percentile_runs(result)
+                st.markdown("### Raw outputs")
+                st.dataframe(result.run_metrics.reset_index(), use_container_width=True)
 
-        st.markdown("### Raw outputs")
-        st.dataframe(result.run_metrics.reset_index(), use_container_width=True)
+    with tab_whatif:
+        st.subheader("Build custom shocks")
+        st.caption("Deterministic path using mean market returns with user-defined shocks.")
+        with st.form(key="what_if_form"):
+            with st.expander("Job loss shock", expanded=False):
+                jl_col1, jl_col2, jl_col3, jl_col4 = st.columns(4)
+                job_loss_enabled = jl_col1.checkbox("Include job loss", value=False)
+                job_loss_month = jl_col2.number_input(
+                    "Month of job loss",
+                    min_value=1,
+                    max_value=sim_inputs.simulation.months,
+                    value=12,
+                    step=1,
+                )
+                unemployment_months = jl_col3.number_input(
+                    "Unemployment duration (months)", min_value=0, max_value=sim_inputs.simulation.months, value=6, step=1
+                )
+                replacement_income = jl_col4.slider(
+                    "Replacement income during unemployment (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=50.0,
+                    step=5.0,
+                )
+                rehire_salary = st.number_input(
+                    "New job annual salary (after rehire)",
+                    min_value=0,
+                    max_value=5_000_000,
+                    value=int(sim_inputs.household.base_salary_annual),
+                    step=5_000,
+                )
+
+            with st.expander("Expense shock", expanded=False):
+                exp_col1, exp_col2 = st.columns(2)
+                expense_enabled = exp_col1.checkbox("Include expense change", value=False)
+                expense_month = exp_col1.number_input(
+                    "Month of expense change",
+                    min_value=1,
+                    max_value=sim_inputs.simulation.months,
+                    value=12,
+                    step=1,
+                )
+                expense_new = exp_col2.number_input(
+                    "New monthly non-housing expense",
+                    min_value=0,
+                    max_value=50_000,
+                    value=int(sim_inputs.household.non_housing_expenses_monthly),
+                    step=100,
+                )
+
+            with st.expander("One-time expense shock", expanded=False):
+                ote_col1, ote_col2 = st.columns(2)
+                one_time_enabled = ote_col1.checkbox("Include one-time expense", value=False)
+                one_time_month = ote_col1.number_input(
+                    "Month of one-time expense",
+                    min_value=1,
+                    max_value=sim_inputs.simulation.months,
+                    value=6,
+                    step=1,
+                )
+                one_time_amount = ote_col2.number_input(
+                    "One-time expense amount",
+                    min_value=0,
+                    max_value=1_000_000,
+                    value=10_000,
+                    step=1_000,
+                )
+
+            run_scenario_btn = st.form_submit_button("Run what-if scenario", type="primary")
+
+        if run_scenario_btn:
+            scenario = WhatIfScenario(
+                job_loss_month=int(job_loss_month) if job_loss_enabled else None,
+                unemployment_months=int(unemployment_months) if job_loss_enabled else 0,
+                replacement_income_ratio=(replacement_income / 100.0) if job_loss_enabled else 0.0,
+                rehire_salary_annual=float(rehire_salary) if job_loss_enabled else None,
+                expense_shock_month=int(expense_month) if expense_enabled else None,
+                expense_new_monthly=float(expense_new) if expense_enabled else None,
+                one_time_expense_month=int(one_time_month) if one_time_enabled else None,
+                one_time_expense_amount=float(one_time_amount) if one_time_enabled else None,
+            )
+            try:
+                result = run_what_if(sim_inputs, scenario)
+            except Exception as exc:
+                st.error(f"Unable to run what-if scenario: {exc}")
+            else:
+                metrics_cols = st.columns(3)
+                metrics_cols[0].metric("Lowest liquidity", f"${result.summary['min_liquidity']:,.0f}")
+                metrics_cols[1].metric("Longest negative streak", f"{result.summary['longest_negative_streak']} mo")
+                metrics_cols[2].metric("Defaulted?", "Yes" if result.summary["defaulted"] else "No")
+
+                st.markdown("**Monthly cash flow and liquidity**")
+                chart_df = result.path[["net_cash_flow", "liquidity"]]
+                st.line_chart(chart_df, height=280)
+
+                st.markdown("**Scenario path details**")
+                st.dataframe(result.path.reset_index(), use_container_width=True)
 
 
 if __name__ == "__main__":

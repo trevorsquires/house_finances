@@ -76,17 +76,24 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
         defaulted = False
         underwater_flag = False
         job_lost = False
+        negative_months = 0
+        current_negative_streak = 0
+        longest_negative_streak = 0
+        min_liquidity = cash + invested_cash + vested_units * stock_price
 
         for month_idx in range(settings.months):
             # Job loss check at start of each year
             if job_loss.enabled and not job_lost and month_idx % 12 == 0:
                 if rng.random() < job_loss.annual_probability:
                     job_lost = True
+                    # Forfeit any remaining unvested RSUs when job is lost
+                    unvested_tranches = []
 
             monthly_income_cash, _ = monthly_income(
                 sim_inputs.household,
                 job_lost=job_lost,
                 replacement_income_ratio=job_loss.replacement_income_ratio if job_loss.enabled else 1.0,
+                month_index=month_idx,
             )
             net_income_cash, tax_on_income = apply_tax(monthly_income_cash, federal_rate, state_rate)
             prev_cash = cash
@@ -95,30 +102,56 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
             mortgage_balance = schedule_row["ending_balance"]
             non_housing = monthly_non_housing_expense(base_expenses, sim_inputs.household.inflation_annual, month_idx)
             total_essential_outflow = housing_payment + recurring_housing + non_housing + sim_inputs.household.debt_payments_monthly
+            essential_net = net_income_cash - total_essential_outflow
 
-            cash_after_essentials = prev_cash + net_income_cash - total_essential_outflow
-
-            # Sell vested stock if needed to avoid default
-            month_default = cash_after_essentials < 0
             liquidated_from_stock = 0.0
-            if cash_after_essentials < 0 and vested_units > 0 and stock_price > 0:
-                needed = abs(cash_after_essentials)
-                available = vested_units * stock_price
-                liquidated_from_stock = min(needed, available)
-                units_to_sell = liquidated_from_stock / stock_price
-                vested_units -= units_to_sell
-                cash_after_essentials += liquidated_from_stock
-                month_default = cash_after_essentials < 0
+            liquidated_from_invested = 0.0
+            month_default = False
 
-            defaulted = defaulted or month_default
+            # Pay essentials; if negative, draw down investments first, then savings
+            cash = prev_cash
+            if essential_net >= 0:
+                cash += essential_net
+            else:
+                deficit = -essential_net
+                take_from_invested = min(deficit, invested_cash)
+                invested_cash -= take_from_invested
+                deficit -= take_from_invested
+                liquidated_from_invested = take_from_invested
+
+                if deficit > 0 and vested_units > 0 and stock_price > 0:
+                    available_stock_value = vested_units * stock_price
+                    sell_value = min(deficit, available_stock_value)
+                    units_to_sell = sell_value / stock_price
+                    vested_units -= units_to_sell
+                    deficit -= sell_value
+                    liquidated_from_stock = sell_value
+
+                take_from_cash = min(deficit, cash)
+                cash -= take_from_cash
+                deficit -= take_from_cash
+
+                month_default = deficit > 0
+                if month_default:
+                    cash -= deficit  # reflect the remaining shortfall
+                defaulted = defaulted or month_default
+
+            if essential_net < 0:
+                negative_months += 1
+                current_negative_streak += 1
+                longest_negative_streak = max(longest_negative_streak, current_negative_streak)
+            else:
+                current_negative_streak = 0
 
             # Optional investing from cash only if there is wiggle room
-            investable_from_cash = max(0.0, cash_after_essentials)
+            investable_from_cash = max(0.0, cash)
             contribution = min(sim_inputs.household.stock_contribution_monthly, investable_from_cash)
-            cash = cash_after_essentials - contribution
+            cash -= contribution
+            invested_cash += contribution
             net_cash_flow = cash - prev_cash
 
-            invested_cash += contribution
+            liquidity_before_market = cash + invested_cash + vested_units * stock_price
+            min_liquidity = min(min_liquidity, liquidity_before_market)
 
             # Apply market moves to invested cash and stock price
             stock_r = stock_returns[run_idx, month_idx]
@@ -126,10 +159,14 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
             invested_cash = max(0.0, invested_cash * (1 + stock_r))
             stock_price = max(0.01, stock_price * (1 + stock_r))  # avoid zero
             property_value = max(0.0, property_value * (1 + home_r))
+            liquidity_after_market = cash + invested_cash + vested_units * stock_price
+            min_liquidity = min(min_liquidity, liquidity_after_market)
 
             # RSU grant at end of each year if job not lost (assumption)
             if (month_idx + 1) % 12 == 0 and not (job_lost and job_loss.stock_comp_stops):
-                grant_units = sim_inputs.household.stock_comp_annual / stock_price if stock_price > 0 else 0.0
+                growth = (1 + sim_inputs.household.salary_growth_annual) ** ((month_idx + 1) / 12.0)
+                annual_stock_comp = sim_inputs.household.stock_comp_annual * growth
+                grant_units = annual_stock_comp / stock_price if stock_price > 0 else 0.0
                 vest_events = max(1, sim_inputs.household.stock_vesting_months // 6)
                 units_per_event = grant_units / vest_events if vest_events else 0.0
                 unvested_tranches.append(
@@ -186,6 +223,8 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
                     "defaulted": month_default,
                     "underwater": underwater,
                     "job_lost": job_lost,
+                    "liquidity": liquidity_after_market,
+                    "liquidated_from_invested": liquidated_from_invested,
                     "liquidated_from_stock": liquidated_from_stock,
                     "vested_this_month": vested_this_month,
                     "tax_paid_income": tax_on_income,
@@ -203,6 +242,9 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
                 "ending_unvested_value": unvested_value,
                 "defaulted": defaulted,
                 "ever_underwater": underwater_flag,
+                "negative_months_pct": negative_months / settings.months,
+                "longest_negative_streak": longest_negative_streak,
+                "min_liquidity": min_liquidity,
             }
         )
 
@@ -214,8 +256,7 @@ def simulate(sim_inputs: SimulationInputs) -> SimulationResult:
     summary = {
         "probability_default": run_metrics_df["defaulted"].mean(),
         "probability_underwater": run_metrics_df["ever_underwater"].mean(),
-        "median_final_net_worth": run_metrics_df["final_net_worth"].median(),
-        "expected_monthly_cash_flow": paths_df["net_cash_flow"].mean(),
+        "expected_final_net_worth": run_metrics_df["final_net_worth"].mean(),
     }
 
     return SimulationResult(paths=paths_df, run_metrics=run_metrics_df, percentile_runs=percentile_runs, summary=summary)
@@ -231,6 +272,6 @@ def _select_percentile_runs(
     for label, pct in percentiles.items():
         target = np.percentile(run_metrics_df["final_net_worth"], pct)
         idx = (run_metrics_df["final_net_worth"] - target).abs().idxmin()
-        percentile_runs[label] = paths_df.loc[idx].reset_index()
+        percentile_runs[label] = paths_df.loc[idx].reset_index().assign(run=idx)
 
     return percentile_runs

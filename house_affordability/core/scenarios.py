@@ -52,6 +52,7 @@ def base_scenario() -> SimulationInputs:
         stock_contribution_monthly=500,
         cash_on_hand=100_000,
         inflation_annual=0.025,
+        salary_growth_annual=0.02,
         other_income_monthly=0.0,
     )
 
