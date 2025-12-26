@@ -55,7 +55,12 @@ def sidebar_inputs() -> SimulationInputs:
         )
 
         st.markdown("### Mortgage")
-        loan_type = st.selectbox("Loan type", options=["fixed", "arm"], index=0 if defaults.mortgage.loan_type == "fixed" else 1)
+        loan_type = st.selectbox(
+            "Loan type",
+            options=["fixed", "arm"],
+            index=0 if defaults.mortgage.loan_type == "fixed" else 1,
+            help="Choose ARM if you expect the rate to adjust after an initial fixed period.",
+        )
         interest_rate = st.number_input(
             "Interest rate (annual %)",
             min_value=0.0,
@@ -63,14 +68,26 @@ def sidebar_inputs() -> SimulationInputs:
             value=float(defaults.mortgage.annual_rate * 100),
             step=0.01,
             format="%.3f",
+            help="Annual percentage rate (APR) for the mortgage.",
         )
         term_years = st.slider("Term (years)", min_value=10, max_value=40, value=defaults.mortgage.term_years, step=5)
         arm_fixed_years = defaults.mortgage.arm_fixed_years
         arm_adjusted_rate = defaults.mortgage.arm_adjusted_rate or defaults.mortgage.annual_rate + 0.01
         if loan_type == "arm":
-            arm_fixed_years = st.slider("ARM fixed period (years)", min_value=1, max_value=10, value=defaults.mortgage.arm_fixed_years)
+            arm_fixed_years = st.slider(
+                "ARM fixed period (years)",
+                min_value=1,
+                max_value=10,
+                value=defaults.mortgage.arm_fixed_years,
+                help="Years the initial ARM rate stays fixed before any adjustments.",
+            )
             arm_adjusted_rate = st.slider(
-                "ARM adjusted rate (annual %)", min_value=0.0, max_value=20.0, value=arm_adjusted_rate * 100, step=0.1
+                "ARM adjusted rate (annual %)",
+                min_value=0.0,
+                max_value=20.0,
+                value=arm_adjusted_rate * 100,
+                step=0.1,
+                help="Expected rate after the fixed period; used to model ARM resets.",
             )
 
     with st.sidebar.expander("Personal Finances", expanded=False):
@@ -107,7 +124,14 @@ def sidebar_inputs() -> SimulationInputs:
 
     with st.sidebar.expander("Simulation & Advanced Settings", expanded=False):
         horizon_years = st.slider("Horizon (years)", min_value=1, max_value=30, value=defaults.simulation.months // 12)
-        num_runs = st.slider("Simulations", min_value=100, max_value=2000, value=defaults.simulation.num_runs, step=50)
+        num_runs = st.slider(
+            "Simulations",
+            min_value=100,
+            max_value=2000,
+            value=defaults.simulation.num_runs,
+            step=50,
+            help="Higher run counts smooth results but take longer to compute.",
+        )
         inflation = st.slider(
             "Expense inflation (annual %)", min_value=0.0, max_value=10.0, value=defaults.household.inflation_annual * 100, step=0.1
         )
@@ -126,20 +150,41 @@ def sidebar_inputs() -> SimulationInputs:
             "Home volatility (annual %)", min_value=0.0, max_value=30.0, value=defaults.market.home_vol_annual * 100, step=0.5
         )
         correlation = st.slider(
-            "Stock/home correlation", min_value=-1.0, max_value=1.0, value=defaults.market.stock_home_correlation, step=0.05
+            "Stock/home correlation",
+            min_value=-1.0,
+            max_value=1.0,
+            value=defaults.market.stock_home_correlation,
+            step=0.05,
+            help="Relationship between stock and home returns (-1 moves opposite, 1 moves together).",
         )
         initial_stock_price = st.slider(
             "RSU reference price ($)", min_value=1.0, max_value=1000.0, value=defaults.household.initial_stock_price, step=1.0
         )
 
         st.subheader("Job loss")
-        enable_job_loss = st.checkbox("Account for job loss", value=defaults.job_loss.enabled)
+        enable_job_loss = st.checkbox(
+            "Account for job loss",
+            value=defaults.job_loss.enabled,
+            help="Adds job loss probability to the Monte Carlo simulation.",
+        )
         job_loss_prob = defaults.job_loss.annual_probability * 100
         replacement_income = defaults.job_loss.replacement_income_ratio * 100
         if enable_job_loss:
-            job_loss_prob = st.slider("Annual probability (%)", min_value=0.0, max_value=50.0, value=job_loss_prob, step=1.0)
+            job_loss_prob = st.slider(
+                "Annual probability (%)",
+                min_value=0.0,
+                max_value=50.0,
+                value=job_loss_prob,
+                step=1.0,
+                help="Chance of losing the job in any given year.",
+            )
             replacement_income = st.slider(
-                "Replacement salary (% of base)", min_value=0.0, max_value=100.0, value=replacement_income, step=1.0
+                "Replacement salary (% of base)",
+                min_value=0.0,
+                max_value=100.0,
+                value=replacement_income,
+                step=1.0,
+                help="Percent of base salary coming from unemployment benefits or side income during unemployment.",
             )
 
     property_inputs = PropertyInputs(
@@ -266,7 +311,7 @@ def render_deterministic(snapshot: dict) -> None:
     st.table(styled)
 
 
-def render_lender_indicators(snapshot: dict, sim_inputs: SimulationInputs) -> None:
+def render_lender_indicators(snapshot: dict) -> None:
     st.subheader("Lender indicators")
     indicators = [
         ("Front-end ratio", snapshot["front_end"] * 100, "<= 31%", snapshot["front_end"] <= 0.31),
@@ -344,6 +389,13 @@ def main():
     st.write(
         "Simulate household finances over time with mortgage payments, market swings, and optional job loss to evaluate how resilient a home purchase is."
     )
+    with st.expander("Quick start", expanded=False):
+        st.markdown(
+            "- Set your purchase, loan, and personal finance details in the sidebar.\n"
+            "- Check **Monthly calculations** and **Lender indicators** to sanity-check cash flow and ratios.\n"
+            "- Click **Run simulation** to see percentile outcomes; use **What-if scenarios** to test specific shocks."
+        )
+        st.caption("Defaults are illustrative; enter your numbers to get meaningful results.")
 
     sim_inputs = sidebar_inputs()
 
@@ -351,15 +403,18 @@ def main():
         ["Monthly calculations", "Lender indicators", "Simulation", "What-if scenarios"]
     )
 
+    snapshot = deterministic_snapshot(sim_inputs)
+
     with tab_calc:
-        snap = deterministic_snapshot(sim_inputs)
-        render_deterministic(snap)
+        st.caption("Deterministic monthly snapshot using the current inputs; negative surplus means a monthly deficit.")
+        render_deterministic(snapshot)
 
     with tab_lender:
-        snap = deterministic_snapshot(sim_inputs)
-        render_lender_indicators(snap, sim_inputs)
+        st.caption("Benchmarks against common lender heuristics (front-end, back-end DTI, LTV, reserves). Targets are illustrative.")
+        render_lender_indicators(snapshot)
 
     with tab_sim:
+        st.caption("Monte Carlo simulation of cash flow and net worth. Adjust horizon and run count in the sidebar if you want more precision.")
         run_btn = st.button("Run simulation", type="primary")
         if not run_btn:
             st.info("Adjust inputs in the sidebar and click **Run simulation**.")
@@ -374,24 +429,40 @@ def main():
                 render_percentile_runs(result)
 
                 st.markdown("### Raw outputs")
-                st.dataframe(result.run_metrics.reset_index(), use_container_width=True)
+                run_metrics_df = result.run_metrics.reset_index()
+                st.dataframe(run_metrics_df, use_container_width=True)
+                st.download_button(
+                    "Download run metrics (CSV)",
+                    data=run_metrics_df.to_csv(index=False),
+                    file_name="run_metrics.csv",
+                    mime="text/csv",
+                    type="secondary",
+                )
 
     with tab_whatif:
         st.subheader("Build custom shocks")
-        st.caption("Deterministic path using mean market returns with user-defined shocks.")
+        st.caption("Deterministic path using mean market returns with user-defined shocks. Use it to see how a specific event sequence plays out.")
         with st.form(key="what_if_form"):
             with st.expander("Job loss shock", expanded=False):
                 jl_col1, jl_col2, jl_col3, jl_col4 = st.columns(4)
-                job_loss_enabled = jl_col1.checkbox("Include job loss", value=False)
+                job_loss_enabled = jl_col1.checkbox(
+                    "Include job loss", value=False, help="Apply a single job loss event on the timeline below."
+                )
                 job_loss_month = jl_col2.number_input(
                     "Month of job loss",
                     min_value=1,
                     max_value=sim_inputs.simulation.months,
                     value=12,
                     step=1,
+                    help="Month index counting from the start of the simulation.",
                 )
                 unemployment_months = jl_col3.number_input(
-                    "Unemployment duration (months)", min_value=0, max_value=sim_inputs.simulation.months, value=6, step=1
+                    "Unemployment duration (months)",
+                    min_value=0,
+                    max_value=sim_inputs.simulation.months,
+                    value=6,
+                    step=1,
+                    help="How long cash flow is reduced after the job loss.",
                 )
                 replacement_income = jl_col4.slider(
                     "Replacement income during unemployment (%)",
@@ -399,6 +470,7 @@ def main():
                     max_value=100.0,
                     value=50.0,
                     step=5.0,
+                    help="Percent of base salary received while unemployed (e.g., severance or side income).",
                 )
                 rehire_salary = st.number_input(
                     "New job annual salary (after rehire)",
@@ -406,17 +478,21 @@ def main():
                     max_value=5_000_000,
                     value=int(sim_inputs.household.base_salary_annual),
                     step=5_000,
+                    help="Annual salary once rehired after the job loss period.",
                 )
 
-            with st.expander("Expense shock", expanded=False):
+            with st.expander("Change in Monthly Expenses", expanded=False):
                 exp_col1, exp_col2 = st.columns(2)
-                expense_enabled = exp_col1.checkbox("Include expense change", value=False)
+                expense_enabled = exp_col1.checkbox(
+                    "Include expense change", value=False, help="Model a permanent jump/drop in non-housing expenses."
+                )
                 expense_month = exp_col1.number_input(
                     "Month of expense change",
                     min_value=1,
                     max_value=sim_inputs.simulation.months,
                     value=12,
                     step=1,
+                    help="Month index when the new expense level starts.",
                 )
                 expense_new = exp_col2.number_input(
                     "New monthly non-housing expense",
@@ -424,17 +500,21 @@ def main():
                     max_value=50_000,
                     value=int(sim_inputs.household.non_housing_expenses_monthly),
                     step=100,
+                    help="Ongoing non-housing expense amount after the change.",
                 )
 
             with st.expander("One-time expense shock", expanded=False):
                 ote_col1, ote_col2 = st.columns(2)
-                one_time_enabled = ote_col1.checkbox("Include one-time expense", value=False)
+                one_time_enabled = ote_col1.checkbox(
+                    "Include one-time expense", value=False, help="Apply a single lump-sum expense (e.g., renovation)."
+                )
                 one_time_month = ote_col1.number_input(
                     "Month of one-time expense",
                     min_value=1,
                     max_value=sim_inputs.simulation.months,
                     value=6,
                     step=1,
+                    help="Month index for the lump-sum hit.",
                 )
                 one_time_amount = ote_col2.number_input(
                     "One-time expense amount",
@@ -442,6 +522,7 @@ def main():
                     max_value=1_000_000,
                     value=10_000,
                     step=1_000,
+                    help="Total one-off expense to deduct in that month.",
                 )
 
             run_scenario_btn = st.form_submit_button("Run what-if scenario", type="primary")
